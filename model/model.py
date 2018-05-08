@@ -2,13 +2,14 @@ import tensorflow as tf
 import numpy as np
 from tf_utils import generate_allwindow, lstm_block
 class RINet(object):
-    def __init__(self, max_orderlen, max_productlen, order_feanum, depthlist, attention_size, state_size):
+    def __init__(self, max_orderlen, max_productlen, order_feanum, depthlist, attention_size, state_size, learning_rate):
         self.max_orderlen = max_orderlen
         self.order_feanum = order_feanum
         self.max_productlen = max_productlen
         self.depthlist = depthlist
         self.attention_size = attention_size
         self.state_size = state_size
+        self.learning_rate = learning_rate
         self.instantiate_weights()
         #order_info
         self.order_productfea = tf.placeholder(tf.int32, [None, self.max_orderlen, order_feanum], name="order_productfea")
@@ -24,8 +25,17 @@ class RINet(object):
         self.curr_departmentid = tf.placeholder(tf.int32, [None], name="curr_departmentid")
         self.curr_productidx = tf.placeholder(tf.int32, [None], name="curr_productidx")
         #label
-        self.label = tf.placeholder(tf.int32,[None], name="label")
-        self.inference()
+        self.label = tf.placeholder(tf.float32,[None], name="label")
+
+        self.global_step = tf.Variable(0, trainable=False, name="Global_Step")
+        self.epoch_step=tf.Variable(0,trainable=False,name="Epoch_Step")
+        self.epoch_increment=tf.assign(self.epoch_step,tf.add(self.epoch_step,tf.constant(1)))
+        self.logits = self.inference()
+        self.probality = tf.sigmoid(self.logits)
+        self.losses = self.loss()
+        self.train_op = self.train()
+
+
     def instantiate_weights(self):
         """define all weights here"""
         self.product_embeddings = tf.get_variable(
@@ -43,7 +53,7 @@ class RINet(object):
             shape=[50, 10],
             dtype=tf.float32
         )
-        self.W_relu = tf.get_variable("W_relu",shape=[545, 30]) 
+        self.W_relu = tf.get_variable("W_relu",shape=[670, 30]) #这个参数后续需要自适应
         self.b_relu = tf.get_variable("bias_relu",shape=[30])       
         self.W_projection = tf.get_variable("W_projection",shape=[30, 1]) 
         self.b_projection = tf.get_variable("bias_projection",shape=[1])    
@@ -113,12 +123,19 @@ class RINet(object):
         lstm_output = lstm_block(allwindow, product_input, self.order_len, self.state_size)
         temp = tf.nn.relu(tf.matmul(lstm_output, self.W_relu) + self.b_relu)
         logits = tf.matmul(temp, self.W_projection) + self.b_projection
-        self.logits = logits
+        logits = tf.squeeze(logits,1)
+        return logits
+
     def loss(self):
         with tf.name_scope("loss"):
-            losses=tf.nn.sigmoid_cross_entropy_with_logits(labels=self.label,logits=self.logits)
+            losses=tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=self.label,logits=self.logits))
             return losses
 
+    def train(self):
+        """based on the loss, use SGD to update parameter"""
+        #learning_rate = tf.train.exponential_decay(self.learning_rate, self.global_step, self.decay_steps,self.decay_rate, staircase=True)   #去掉decay_steps
+        train_op = tf.contrib.layers.optimize_loss(self.losses, global_step=self.global_step, learning_rate=self.learning_rate, optimizer="Adam")
+        return train_op
 
 
 def test():
@@ -129,7 +146,8 @@ def test():
     attention_size = 100
     state_size = 100
     batch_size = 10
-    recurrIntereNet = RINet(max_orderlen, max_productlen, order_feanum, depthlist, attention_size, state_size)
+    learning_rate = 0.01
+    recurrIntereNet = RINet(max_orderlen, max_productlen, order_feanum, depthlist, attention_size, state_size, learning_rate)
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
 
@@ -149,7 +167,7 @@ def test():
             #label
             label = np.zeros([10])
             
-            logits = sess.run(recurrIntereNet.logits,feed_dict={
+            losses, _ = sess.run([recurrIntereNet.losses, recurrIntereNet.train_op],feed_dict={
                                             recurrIntereNet.order_productfea:order_productfea,
                                             recurrIntereNet.order_productid : order_productid,
                                             recurrIntereNet.order_aisleid : order_aisleid,
@@ -162,7 +180,7 @@ def test():
                                             recurrIntereNet.curr_departmentid: curr_departmentid,
                                             recurrIntereNet.curr_productidx: curr_productidx,
                                             recurrIntereNet.label:label})
-            print(np.asarray(logits).shape)       
+            print(losses)       
 
 if __name__ == "__main__":
     test()
