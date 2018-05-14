@@ -79,6 +79,7 @@ if __name__ == "__main__":
     curr_productidx = []
 
     train_data_list = []
+    train_data_label = []
     count = 0
     for row in train_data.itertuples():
         count += 1
@@ -103,8 +104,9 @@ if __name__ == "__main__":
         temp_train_data.append(row.department_id) #第4维 department_id
         temp_train_data.append(0) #第5维 product_idx
 
+        train_data_label.append(row.reordered)
         train_data_list.append(temp_train_data)
 
     ##save
     with open("../data/processed/final_train_data","wb") as f_out:
-        pickle.dump(train_data_list, f_out, protocol=4)
+        pickle.dump([train_data_list, train_data_label], f_out, protocol=4)
